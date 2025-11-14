@@ -1,111 +1,277 @@
----
-toc: false
----
-
 <div class="hero">
-  <h1>Finalprojd3</h1>
-  <h2>Welcome to your new app! Edit&nbsp;<code style="font-size: 90%;">src/index.md</code> to change this page.</h2>
+  <h1>Satellite Proj</h1>
   <a href="https://observablehq.com/framework/getting-started">Get started<span style="display: inline-block; margin-left: 0.25rem;">↗︎</span></a>
 </div>
 
-<div class="grid grid-cols-2" style="grid-auto-rows: 504px;">
-  <div class="card">${
-    resize((width) => Plot.plot({
-      title: "Your awesomeness over time 🚀",
-      subtitle: "Up and to the right!",
-      width,
-      y: {grid: true, label: "Awesomeness"},
-      marks: [
-        Plot.ruleY([0]),
-        Plot.lineY(aapl, {x: "Date", y: "Close", tip: true})
-      ]
-    }))
-  }</div>
-  <div class="card">${
-    resize((width) => Plot.plot({
-      title: "How big are penguins, anyway? 🐧",
-      width,
-      grid: true,
-      x: {label: "Body mass (g)"},
-      y: {label: "Flipper length (mm)"},
-      color: {legend: true},
-      marks: [
-        Plot.linearRegressionY(penguins, {x: "body_mass_g", y: "flipper_length_mm", stroke: "species"}),
-        Plot.dot(penguins, {x: "body_mass_g", y: "flipper_length_mm", stroke: "species", tip: true})
-      ]
-    }))
-  }</div>
-</div>
+<script src="https://unpkg.com/topojson-client@3"></script>
 
----
+```js
+const width = 800;
+const height = 800;
 
-## Next steps
+const satelliteData = await FileAttachment("satellites.json").json();
 
-Here are some ideas of things you could try…
+// Convert orbital elements to ground track points
+function generateGroundTrack({
+  inclination, // degrees
+  raan, // right ascension of ascending node (Ω)
+  argPerigee, // ω
+  eccentricity,
+  semiMajorAxis, // km
+  periodMinutes,
+  steps = 500, // number of points along path
+}) {
+  const mu = 398600.4418; // km^3/s^2
+  const earthRotation = 360 / (23.9345 * 3600); // deg/sec
 
-<div class="grid grid-cols-4">
-  <div class="card">
-    Chart your own data using <a href="https://observablehq.com/framework/lib/plot"><code>Plot</code></a> and <a href="https://observablehq.com/framework/files"><code>FileAttachment</code></a>. Make it responsive using <a href="https://observablehq.com/framework/javascript#resize(render)"><code>resize</code></a>.
-  </div>
-  <div class="card">
-    Create a <a href="https://observablehq.com/framework/project-structure">new page</a> by adding a Markdown file (<code>whatever.md</code>) to the <code>src</code> folder.
-  </div>
-  <div class="card">
-    Add a drop-down menu using <a href="https://observablehq.com/framework/inputs/select"><code>Inputs.select</code></a> and use it to filter the data shown in a chart.
-  </div>
-  <div class="card">
-    Write a <a href="https://observablehq.com/framework/loaders">data loader</a> that queries a local database or API, generating a data snapshot on build.
-  </div>
-  <div class="card">
-    Import a <a href="https://observablehq.com/framework/imports">recommended library</a> from npm, such as <a href="https://observablehq.com/framework/lib/leaflet">Leaflet</a>, <a href="https://observablehq.com/framework/lib/dot">GraphViz</a>, <a href="https://observablehq.com/framework/lib/tex">TeX</a>, or <a href="https://observablehq.com/framework/lib/duckdb">DuckDB</a>.
-  </div>
-  <div class="card">
-    Ask for help, or share your work or ideas, on our <a href="https://github.com/observablehq/framework/discussions">GitHub discussions</a>.
-  </div>
-  <div class="card">
-    Visit <a href="https://github.com/observablehq/framework">Framework on GitHub</a> and give us a star. Or file an issue if you’ve found a bug!
-  </div>
-</div>
+  const i = (inclination * Math.PI) / 180;
+  const Ω = (raan * Math.PI) / 180;
+  const ω = (argPerigee * Math.PI) / 180;
 
-<style>
+  // Convert period to seconds
+  const T = periodMinutes * 60;
 
-.hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  font-family: var(--sans-serif);
-  margin: 4rem 0 8rem;
-  text-wrap: balance;
-  text-align: center;
-}
+  // Output array
+  const track = [];
 
-.hero h1 {
-  margin: 1rem 0;
-  padding: 1rem 0;
-  max-width: none;
-  font-size: 14vw;
-  font-weight: 900;
-  line-height: 1;
-  background: linear-gradient(30deg, var(--theme-foreground-focus), currentColor);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
+  for (let k = 0; k < steps; k++) {
+    const t = (k / steps) * T;
 
-.hero h2 {
-  margin: 0;
-  max-width: 34em;
-  font-size: 20px;
-  font-style: initial;
-  font-weight: 500;
-  line-height: 1.5;
-  color: var(--theme-foreground-muted);
-}
+    // Mean anomaly
+    const M = 2 * Math.PI * (t / T);
 
-@media (min-width: 640px) {
-  .hero h1 {
-    font-size: 90px;
+    // Eccentric anomaly via simple iteration
+    let E = M;
+    for (let j = 0; j < 5; j++) {
+      E = M + eccentricity * Math.sin(E);
+    }
+
+    // True anomaly
+    const ν =
+      2 *
+      Math.atan2(
+        Math.sqrt(1 + eccentricity) * Math.sin(E / 2),
+        Math.sqrt(1 - eccentricity) * Math.cos(E / 2)
+      );
+
+    // Distance from Earth center (km)
+    const r = semiMajorAxis * (1 - eccentricity * Math.cos(E));
+
+    // Perifocal coordinates
+    const x_p = r * Math.cos(ν);
+    const y_p = r * Math.sin(ν);
+    const z_p = 0;
+
+    // Rotation matrix to ECI frame
+    const cosΩ = Math.cos(Ω),
+      sinΩ = Math.sin(Ω);
+    const cosω = Math.cos(ω),
+      sinω = Math.sin(ω);
+    const cosi = Math.cos(i),
+      sini = Math.sin(i);
+
+    const x =
+      x_p * (cosΩ * cosω - sinΩ * sinω * cosi) -
+      y_p * (cosΩ * sinω + sinΩ * cosω * cosi);
+    const y =
+      x_p * (sinΩ * cosω + cosΩ * sinω * cosi) -
+      y_p * (sinΩ * sinω - cosΩ * cosω * cosi);
+    const z = x_p * (sinω * sini) + y_p * (cosω * sini);
+
+    // Convert ECI → rotating Earth (subtract Earth rotation)
+    const theta = (earthRotation * t * Math.PI) / 180; // radians
+    const x_e = x * Math.cos(theta) + y * Math.sin(theta);
+    const y_e = -x * Math.sin(theta) + y * Math.cos(theta);
+    const z_e = z;
+
+    // Convert to lat/lon
+    const lon = (Math.atan2(y_e, x_e) * 180) / Math.PI;
+    const lat =
+      (Math.atan2(z_e, Math.sqrt(x_e * x_e + y_e * y_e)) * 180) / Math.PI;
+
+    track.push([lon, lat]);
   }
+
+  return track;
 }
 
-</style>
+const projection = d3
+  .geoOrthographic()
+  .scale(350) // Controls the globe size
+  .translate([width / 2, height / 2])
+  .rotate([0, -90]) // Center on the North Pole
+  .clipAngle(90); // Show only one hemisphere
+
+const path = d3.geoPath().projection(projection);
+
+const svg = d3
+  .select("body")
+  .append("svg")
+  .attr("width", width)
+  .attr("height", height);
+
+// Draw the globe outline (ocean)
+svg
+  .append("path")
+  .datum({ type: "Sphere" })
+  .attr("d", path)
+  .attr("fill", "#cce5ff")
+  .attr("stroke", "#000");
+
+// Load and draw countries
+d3.json("https://unpkg.com/world-atlas@2/countries-110m.json").then(
+  (worldData) => {
+    const countries = topojson.feature(worldData, worldData.objects.countries);
+
+    svg
+      .selectAll(".country")
+      .data(countries.features)
+      .enter()
+      .append("path")
+      .attr("class", "country")
+      .attr("d", path)
+      .attr("fill", "#d9d9d9")
+      .attr("stroke", "#333")
+      .attr("stroke-width", 0.5);
+
+    // Optionally add graticule (lat/long lines)
+    const graticule = d3.geoGraticule();
+    svg
+      .append("path")
+      .datum(graticule())
+      .attr("d", path)
+      .attr("fill", "none")
+      .attr("stroke", "#888")
+      .attr("stroke-opacity", 0.3);
+
+    // Filter satellites with valid orbital parameters
+    const validSats = satelliteData.filter(
+      (sat) =>
+        sat["Perigee (km)"] &&
+        sat["Apogee (km)"] &&
+        sat["Inclination (degrees)"] &&
+        sat["Period (minutes)"]
+    );
+
+    // Take only 3 satellites
+    const threeSats = validSats.slice(0, 150);
+
+    threeSats.forEach((sat) => {
+      const Re = 6371; // Earth radius in km
+      const rp = Re + sat["Perigee (km)"];
+      const ra = Re + sat["Apogee (km)"];
+      const a = (rp + ra) / 2;
+
+      const track = generateGroundTrack({
+        inclination: sat["Inclination (degrees)"],
+        raan: 0, // placeholder
+        argPerigee: 0, // placeholder
+        eccentricity: sat["Eccentricity"],
+        semiMajorAxis: a,
+        periodMinutes: sat["Period (minutes)"],
+        steps: 500,
+      });
+
+      const orbitGeoJSON = {
+        type: "LineString",
+        coordinates: track,
+      };
+
+      svg
+        .append("path")
+        .datum({ orbit: orbitGeoJSON, sat })
+        .attr("d", path(orbitGeoJSON))
+        .attr("stroke", "red")
+        .attr("stroke-width", 1)
+        .attr("fill", "none")
+        .attr("opacity", 0.6)
+        .on("mouseover", function (event, d) {
+          tooltip.style("opacity", 1).html(`
+        <b>${d.sat["Current Official Name of Satellite"] || "Unnamed"}</b><br>
+        <b>Country:</b> ${d.sat["Country of Operator/Owner"]}<br>
+        <b>Purpose:</b> ${d.sat["Purpose"]}<br>
+        <b>Launch Date:</b> ${new Date(
+          d.sat["Date of Launch"]
+        ).toLocaleDateString()}<br>
+        <b>Inclination:</b> ${d.sat["Inclination (degrees)"]}°<br>
+        <b>Altitude:</b> ${d.sat["Perigee (km)"]}–${d.sat["Apogee (km)"]} km
+      `);
+
+          d3.select(this)
+            .attr("stroke-width", 3)
+            .attr("opacity", 1)
+            .attr("stroke", "yellow"); // highlight on hover
+        })
+        .on("mousemove", function (event) {
+          tooltip
+            .style("left", event.pageX + 15 + "px")
+            .style("top", event.pageY + 15 + "px");
+        })
+        .on("mouseout", function () {
+          tooltip.style("opacity", 0);
+          d3.select(this)
+            .attr("stroke-width", 1)
+            .attr("opacity", 0.6)
+            .attr("stroke", "red"); // restore style
+        });
+    });
+
+    // Example satellite path (just a great circle arc)
+    // const satellitePath = {
+    //   type: "LineString",
+    //   coordinates: [
+    //     [0, 0], // longitude, latitude
+    //     [90, 45],
+    //     [180, 0],
+    //   ],
+    // };
+
+    // svg
+    //   .append("path")
+    //   .datum(satellitePath)
+    //   .attr("d", path)
+    //   .attr("stroke", "red")
+    //   .attr("fill", "none")
+    //   .attr("stroke-width", 2);
+
+    let rotationAngle = 0;
+    let spinning = false;
+    let timer = null;
+
+    // let timer = d3.timer((elapsed) => {
+    //   rotationAngle = elapsed * 0.02; // degrees
+    //   projection.rotate([rotationAngle, -90]);
+    //   svg.selectAll("path").attr("d", path);
+    // });
+
+    svg.on("click", () => {
+      if (spinning) {
+        timer.stop();
+        spinning = false;
+      } else {
+        const startAngle = rotationAngle;
+        timer = d3.timer((elapsed) => {
+          projection.rotate([startAngle + elapsed * 0.02, -90]);
+          svg.selectAll("path").attr("d", path);
+          rotationAngle = startAngle + elapsed * 0.02; // keep track for next toggle
+        });
+        spinning = true;
+      }
+    });
+  }
+);
+// Create tooltip
+const tooltip = d3
+  .select("body")
+  .append("div")
+  .style("position", "absolute")
+  .style("padding", "8px")
+  .style("background", "rgba(0,0,0,0.8)")
+  .style("color", "white")
+  .style("border-radius", "5px")
+  .style("pointer-events", "none")
+  .style("font-size", "14px")
+  .style("opacity", 0);
+
+display(svg.node());
+```
